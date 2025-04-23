@@ -115,8 +115,7 @@ int main(int argc, char** argv) {
         ct_mat[row * ct_mat_cols + col] = ct[i];
     }
     std::cout << "\n C matrix loaded\n";
-    // Start timing
-    cudaEventRecord(start);
+   
 
     // Allocate and copy C matrix to device
     float* d_C = nullptr;
@@ -141,7 +140,8 @@ int main(int argc, char** argv) {
     float* d_y = nullptr;
     cudaMalloc(&d_y, x_rows * ct_mat_cols * sizeof(float));
 
-    
+    // Start timing
+    cudaEventRecord(start);
 
     // deltaW = H × C × Hᵗ
     float* d_deltaW = nullptr;
