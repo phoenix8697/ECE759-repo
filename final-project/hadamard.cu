@@ -40,6 +40,7 @@ __global__ void matmul_kernel(const float* A, const float* B, float* C, int M, i
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
+    printf("\nRunning matrix multiplication\n");
     if (row < M && col < N) {
         float sum = 0.0f;
         for (int i = 0; i < K; ++i) {
@@ -50,18 +51,25 @@ __global__ void matmul_kernel(const float* A, const float* B, float* C, int M, i
 }
 
 // Calculate deltaW = H * C * H^T
-void calculate_deltaW(float* d_H_row, float* d_C, float* d_H_col, int rows, int cols, float** d_deltaW) {
+void calculate_deltaW(float* d_H_row, float* d_C, float* d_H_col, int rows, int cols, float** d_deltaW, int threads_per_block) {
     float* d_temp;
     cudaMalloc(&d_temp, rows * cols * sizeof(float));
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 blocksPerGrid((cols + 15) / 16, (rows + 15) / 16);
+    //dim3 threadsPerBlock(16, 16);
+    //dim3 blocksPerGrid((cols + 15) / 16, (rows + 15) / 16);
 
-    matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_H_row, d_C, d_temp, rows, cols, rows);
+    int tx = std::sqrt(threads_per_block);
+    int ty = threads_per_block / tx;
+    dim3 threadsPerBlockDim(tx, ty);
+    dim3 blocksPerGrid((cols + tx - 1) / tx, (rows + ty - 1) / ty);
+
+    //matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_H_row, d_C, d_temp, rows, cols, rows);
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_H_row, d_C, d_temp, rows, cols, rows);
     cudaDeviceSynchronize();
 
     cudaMalloc(d_deltaW, rows * cols * sizeof(float));
-    matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols);
+    //matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols);
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols);
     cudaDeviceSynchronize();
 
     cudaFree(d_temp);
@@ -145,14 +153,19 @@ int main(int argc, char** argv) {
 
     // deltaW = H × C × Hᵗ
     float* d_deltaW = nullptr;
-    calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW);
+    calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW, threads_per_block);
 
     std::cout << "\n Detla W completed\n";
     cudaDeviceSynchronize();
 
     // Y = deltaW × X
-    dim3 threadsPerBlockDim(16, 16);
-    dim3 blocksPerGrid((ct_mat_cols + 15) / 16, (x_rows + 15) / 16);
+    //dim3 threadsPerBlockDim(16, 16);
+    //dim3 blocksPerGrid((ct_mat_cols + 15) / 16, (x_rows + 15) / 16);
+    int tx = std::sqrt(threads_per_block);
+    int ty = threads_per_block / tx;
+    dim3 threadsPerBlockDim(tx, ty);
+    dim3 blocksPerGrid((ct_mat_cols + tx - 1) / tx, (x_rows + ty - 1) / ty);
+
     // last parameter to matmul_kernel is truncated to x_cols truncate the ct_mat_cols to x_cols
     int x_cols_compute = ct_mat_rows > x_cols ? x_cols : ct_mat_rows;
     matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols_compute); 
@@ -163,7 +176,7 @@ int main(int argc, char** argv) {
     // End timing
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-    float milliseconds = 0;
+    float milliseconds = 0.0f;
     cudaEventElapsedTime(&milliseconds, start, stop);
 
     std::cout << "\n All computations done on CUDA!\n";
