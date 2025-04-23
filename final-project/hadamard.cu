@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
         int col = locs[locs_cols + i];
         ct_mat[row * ct_mat_cols + col] = ct[i];
     }
-
+    std::cout << "\n C matrix loaded\n";
     // Start timing
     cudaEventRecord(start);
 
@@ -122,18 +122,21 @@ int main(int argc, char** argv) {
     float* d_C = nullptr;
     cudaMalloc(&d_C, ct_mat_rows * ct_mat_cols * sizeof(float));
     cudaMemcpy(d_C, ct_mat, ct_mat_rows * ct_mat_cols * sizeof(float), cudaMemcpyHostToDevice);
-    
+    std::cout << "\n C matrix copied into device\n";
+
     // Create Hadamard matrices
     float* d_H_row = nullptr;
     float* d_H_col = nullptr;
     create_hadamard_matrix(ct_mat_rows, &d_H_row);
     create_hadamard_matrix(ct_mat_cols, &d_H_col);
+    std::cout << "\n Hadamard matrix created\n";
 
     // Copy input X to device
     float* d_x = nullptr;
     cudaMalloc(&d_x, x_rows * x_cols * sizeof(float));
     cudaMemcpy(d_x, x, x_rows * x_cols * sizeof(float), cudaMemcpyHostToDevice);
-
+    
+    std::cout << "\n Input X copied into device\n";
     // Allocate output Y on device
     float* d_y = nullptr;
     cudaMalloc(&d_y, x_rows * ct_mat_cols * sizeof(float));
@@ -143,14 +146,18 @@ int main(int argc, char** argv) {
     // deltaW = H × C × Hᵗ
     float* d_deltaW = nullptr;
     calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW);
+
+    std::cout << "\n Detla W completed\n";
     cudaDeviceSynchronize();
 
     // Y = deltaW × X
     dim3 threadsPerBlockDim(16, 16);
     dim3 blocksPerGrid((ct_mat_cols + 15) / 16, (x_rows + 15) / 16);
     // last parameter to matmul_kernel is truncated to x_cols truncate the ct_mat_cols to x_cols
-    //int x_cols_compute = ct_mat_rows > x_cols ? x_cols : ct_mat_rows;
-    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols); 
+    int x_cols_compute = ct_mat_rows > x_cols ? x_cols : ct_mat_rows;
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols_compute); 
+
+    std::cout << "\n Y computation completed\n";
     cudaDeviceSynchronize();
 
     // End timing
