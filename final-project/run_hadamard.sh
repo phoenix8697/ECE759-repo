@@ -13,9 +13,10 @@ module load nvidia/cuda/11.8.0
 # Compile
 nvcc hadamard.cu ./cnpy/cnpy.cpp ./utils/load_ckpt.cpp \
   -o hadamard_exec \
-  -std=c++17 -O3 -Xcompiler -Wall \
+  -std=c++17 -O3 -Xcompiler "-Wall -Wno-unused-variable -Wno-unused-but-set-variable" \
   -I./utils -I./cnpy \
   -lz
+
 
 # Execute with correct argument order
 # Format: <ct_rows> <ct_cols> <num_tokens> <threads_per_block> <CT> <LOCS> <X>
