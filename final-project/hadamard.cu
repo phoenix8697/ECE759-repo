@@ -167,7 +167,8 @@ int main(int argc, char** argv) {
     dim3 blocksPerGrid((ct_mat_cols + tx - 1) / tx, (x_rows + ty - 1) / ty);
 
     // last parameter to matmul_kernel is truncated to x_cols truncate the ct_mat_cols to x_cols
-    int x_cols_compute = ct_mat_rows > x_cols ? x_cols : ct_mat_rows;
+    int x_cols_int = static_cast<int>(x_cols);
+    int x_cols_compute = (ct_mat_rows > x_cols_int) ? x_cols_int : ct_mat_rows;
     matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols_compute); 
 
     std::cout << "\n Y computation completed\n";
