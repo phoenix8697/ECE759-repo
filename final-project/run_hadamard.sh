@@ -24,3 +24,23 @@ nvcc hadamard.cu ./cnpy/cnpy.cpp ./utils/load_ckpt.cpp \
   ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-CT.npy \
   ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-locs.npy \
   ./gemma-2-2b/inputs/x_1.npy
+
+  ./hadamard_exec 2304 2048 1 16 \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-CT.npy \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-locs.npy \
+  ./gemma-2-2b/inputs/x_16.npy
+
+    ./hadamard_exec 2304 2048 1 16 \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-CT.npy \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-locs.npy \
+  ./gemma-2-2b/inputs/x_128.npy
+
+   ./hadamard_exec 2304 2048 1 16 \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-CT.npy \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-locs.npy \
+  ./gemma-2-2b/inputs/x_512.npy
+
+   ./hadamard_exec 2304 2048 1 16 \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-CT.npy \
+  ./gemma-2-2b/query/Gemma-2-2b-hadamard-query-locs.npy \
+  ./gemma-2-2b/inputs/x_1024.npy
