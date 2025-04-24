@@ -160,15 +160,40 @@ int main(int argc, char** argv) {
     // Y = deltaW × X
     //dim3 threadsPerBlockDim(16, 16);
     //dim3 blocksPerGrid((ct_mat_cols + 15) / 16, (x_rows + 15) / 16);
+    //dim3 blocksPerGrid((ct_mat_cols + tx - 1) / tx, (x_rows + ty - 1) / ty);
+
+    float* d_deltaW_trimmed;
+    cudaMalloc(&d_deltaW_trimmed, ct_mat_rows * x_rows * sizeof(float));
+
+    // Use cudaMemcpy2D to copy selected portion row-wise
+    cudaMemcpy2D(
+        d_deltaW_trimmed,               // dst
+        x_rows * sizeof(float),         // dst pitch (row stride)
+        d_deltaW,                       // src
+        ct_mat_cols * sizeof(float),    // src pitch (full row stride)
+        x_rows * sizeof(float),         // width in bytes (columns to keep)
+        ct_mat_rows,                    // height (number of rows)
+        cudaMemcpyDeviceToDevice
+    );
+
     int tx = std::sqrt(threads_per_block);
     int ty = threads_per_block / tx;
     dim3 threadsPerBlockDim(tx, ty);
-    dim3 blocksPerGrid((ct_mat_cols + tx - 1) / tx, (x_rows + ty - 1) / ty);
+    dim3 blocksPerGrid((x_cols + tx - 1) / tx, (ct_mat_rows + ty - 1) / ty);
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(
+        d_deltaW_trimmed,
+        d_x,
+        d_y,
+        ct_mat_rows,
+        x_cols,
+        x_rows
+    );
+
 
     // last parameter to matmul_kernel is truncated to x_cols truncate the ct_mat_cols to x_cols
-    int x_cols_int = static_cast<int>(x_cols);
-    int x_cols_compute = (ct_mat_rows > x_cols_int) ? x_cols_int : ct_mat_rows;
-    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols_compute); 
+    //int x_cols_int = static_cast<int>(x_cols);
+    //int x_cols_compute = (ct_mat_rows > x_cols_int) ? x_cols_int : ct_mat_rows;
+    //matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols_compute); 
 
     std::cout << "\n Y computation completed\n";
     cudaDeviceSynchronize();
