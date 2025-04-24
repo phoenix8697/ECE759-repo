@@ -36,7 +36,7 @@ void create_hadamard_matrix(int n, float** d_H) {
 }
 
 // CUDA Matrix Multiplication Kernel
-/* __global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K) {
+__global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -47,28 +47,8 @@ void create_hadamard_matrix(int n, float** d_H) {
         }
         C[row * N + col] = sum;
     }
-} */
+} 
 
-// CUDA Matrix Multiplication Kernel with clock64 timing
-__global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K, unsigned long long* d_cycles) {
-    unsigned long long start = clock64();
-
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (row < M && col < N) {
-        float sum = 0.0f;
-        for (int i = 0; i < K; ++i) {
-            sum += A[row * K + i] * B[i * N + col];
-        }
-        C[row * N + col] = sum;
-    }
-
-    unsigned long long end = clock64();
-
-    if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-        d_cycles[0] = end - start;
-}
 
 // Calculate deltaW = H * C * H^T
 void calculate_deltaW(float* d_H_row, float* d_C, float* d_H_col, int rows, int cols, float** d_deltaW, int threads_per_block) {
