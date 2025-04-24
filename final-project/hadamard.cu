@@ -50,23 +50,6 @@ __global__ void matmul_kernel_1d(const float* A, const float* B, float* C, int M
     C[row * N + col] = sum;
 }
 
-// Calculate deltaW = H * C * H^T using 1D kernel
-void calculate_deltaW(float* d_H_row, float* d_C, float* d_H_col, int rows, int cols, float** d_deltaW, int threads_per_block) {
-    float* d_temp;
-    cudaMalloc(&d_temp, rows * cols * sizeof(float));
-
-    int total_threads_temp = rows * cols;
-    int num_blocks_temp = (total_threads_temp + threads_per_block - 1) / threads_per_block;
-    matmul_kernel_1d<<<num_blocks_temp, threads_per_block>>>(d_H_row, d_C, d_temp, rows, cols, rows);
-
-    cudaMalloc(d_deltaW, rows * cols * sizeof(float));
-    int total_threads_final = rows * cols;
-    int num_blocks_final = (total_threads_final + threads_per_block - 1) / threads_per_block;
-    matmul_kernel_1d<<<num_blocks_final, threads_per_block>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols);
-
-    cudaFree(d_temp);
-}
-
 int main(int argc, char** argv) {
     if (argc != 8) {
         std::cerr << "Usage: " << argv[0]
@@ -126,43 +109,88 @@ int main(int argc, char** argv) {
 
     float* d_y = nullptr;
     cudaMalloc(&d_y, x_rows * ct_mat_cols * sizeof(float));
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-
-    float* d_deltaW = nullptr;
-    calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW, threads_per_block);
-    std::cout << "\n Delta W completed\n";
-
     float* d_deltaW_trimmed;
     cudaMalloc(&d_deltaW_trimmed, ct_mat_rows * x_rows * sizeof(float));
-    cudaMemcpy2D(d_deltaW_trimmed, x_rows * sizeof(float), d_deltaW, ct_mat_cols * sizeof(float), x_rows * sizeof(float), ct_mat_rows, cudaMemcpyDeviceToDevice);
+
+    // CUDA events for deltaW
+    cudaEvent_t start, mid, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&mid);
+    cudaEventCreate(&stop);
+
+    // deltaW = H * C * H^T
+    float* d_temp;
+    float* d_deltaW = nullptr;
+    cudaMalloc(&d_temp, ct_mat_rows * ct_mat_cols * sizeof(float));
+    cudaMalloc(&d_deltaW, ct_mat_rows * ct_mat_cols * sizeof(float));
+
+    int total_threads_temp = ct_mat_rows * ct_mat_cols;
+    int num_blocks_temp = (total_threads_temp + threads_per_block - 1) / threads_per_block;
+
+    cudaEventRecord(start);
+    matmul_kernel_1d<<<num_blocks_temp, threads_per_block>>>(
+        d_H_row, d_C, d_temp, ct_mat_rows, ct_mat_cols, ct_mat_rows);
+    cudaEventRecord(mid);
+
+    int total_threads_final = ct_mat_rows * ct_mat_cols;
+    int num_blocks_final = (total_threads_final + threads_per_block - 1) / threads_per_block;
+
+    matmul_kernel_1d<<<num_blocks_final, threads_per_block>>>(
+        d_temp, d_H_col, d_deltaW, ct_mat_rows, ct_mat_cols, ct_mat_cols);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float time_HC = 0.0f, time_HCHT = 0.0f;
+    cudaEventElapsedTime(&time_HC, start, mid);
+    cudaEventElapsedTime(&time_HCHT, mid, stop);
+
+    //std::cout << "\n✅ Delta W computed using Hadamard matrices\n";
+    //std::cout << "⏱ H * C kernel time: " << time_HC << " ms\n";
+    //std::cout << "⏱ (H * C) * H^T kernel time: " << time_HCHT << " ms\n";
+
+    // Trim deltaW before final Y = deltaW * X
+    cudaMemcpy2D(d_deltaW_trimmed, x_rows * sizeof(float),
+                 d_deltaW, ct_mat_cols * sizeof(float),
+                 x_rows * sizeof(float), ct_mat_rows,
+                 cudaMemcpyDeviceToDevice);
 
     int total_threads_Y = x_rows * ct_mat_cols;
     int num_blocks_Y = (total_threads_Y + threads_per_block - 1) / threads_per_block;
 
-    std::cout << "\n Launching 1D matmul_kernel with " << num_blocks_Y << " blocks and " << threads_per_block << " threads per block.\n";
+    // Time final Y = deltaW * X
+    cudaEvent_t final_start, final_stop;
+    cudaEventCreate(&final_start);
+    cudaEventCreate(&final_stop);
 
-    matmul_kernel_1d<<<num_blocks_Y, threads_per_block>>>(d_deltaW_trimmed, d_x, d_y, ct_mat_rows, x_cols, x_rows);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+    cudaEventRecord(final_start);
+    matmul_kernel_1d<<<num_blocks_Y, threads_per_block>>>(
+        d_deltaW_trimmed, d_x, d_y, ct_mat_rows, x_cols, x_rows);
+    cudaEventRecord(final_stop);
+    cudaEventSynchronize(final_stop);
 
-    float milliseconds = 0.0f;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "\n✅ All computations done on CUDA!\n";
-    std::cout << "⏱ CUDA Execution Time: " << milliseconds << " ms\n";
+    float time_Y = 0.0f;
+    cudaEventElapsedTime(&time_Y, final_start, final_stop);
 
+    //std::cout << "\n✅ Final matmul for Y done!\n";
+    //std::cout << "⏱ Y = deltaW * X kernel time: " << time_Y << " ms\n";
+    std::cout << "Model:" << ct_directory << "\n";
+    std::cout << "Input:" << x_directory << "\n";
+    std::cout << "Number of Threads per block:" << threads_per_block << "Total Time:" << time_Y + time_HC + time_HCHT << " ms\n";
+
+    // Cleanup
     cudaFree(d_H_row);
     cudaFree(d_H_col);
     cudaFree(d_C);
+    cudaFree(d_temp);
     cudaFree(d_deltaW);
     cudaFree(d_deltaW_trimmed);
     cudaFree(d_x);
     cudaFree(d_y);
     cudaEventDestroy(start);
+    cudaEventDestroy(mid);
     cudaEventDestroy(stop);
+    cudaEventDestroy(final_start);
+    cudaEventDestroy(final_stop);
 
     delete[] h_y;
     delete[] h_D;
