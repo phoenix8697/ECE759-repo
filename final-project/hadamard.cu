@@ -153,9 +153,13 @@ int main(int argc, char** argv) {
     // deltaW = H × C × Hᵗ
     float* d_deltaW = nullptr;
     calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW, threads_per_block);
-
     std::cout << "\n Detla W completed\n";
     cudaDeviceSynchronize();
+
+     // Cleanup
+     cudaFree(d_H_row);
+     cudaFree(d_H_col);
+     cudaFree(d_C);
 
     // Y = deltaW × X
     //dim3 threadsPerBlockDim(16, 16);
@@ -176,10 +180,17 @@ int main(int argc, char** argv) {
         cudaMemcpyDeviceToDevice
     );
 
+    // Calculate thread block and grid dimensions
     int tx = std::sqrt(threads_per_block);
     int ty = threads_per_block / tx;
+    int grid_x = (x_cols + tx - 1) / tx;
+    int grid_y = (ct_mat_rows + ty - 1) / ty;
     dim3 threadsPerBlockDim(tx, ty);
-    dim3 blocksPerGrid((x_cols + tx - 1) / tx, (ct_mat_rows + ty - 1) / ty);
+    dim3 blocksPerGrid(grid_x, grid_y);
+
+    std::cout << "\n Launching matmul_kernel with: \n";
+    std::cout << "\tThreads per block: (" << tx << ", " << ty << ")\n";
+    std::cout << "\tBlocks per grid: (" << grid_x << ", " << grid_y << ")\n";
     matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(
         d_deltaW_trimmed,
         d_x,
@@ -208,10 +219,11 @@ int main(int argc, char** argv) {
     std::cout << "CUDA Execution Time: " << milliseconds << " ms\n";
 
     // Cleanup
-    cudaFree(d_H_row);
-    cudaFree(d_H_col);
-    cudaFree(d_C);
+    //cudaFree(d_H_row);
+    //cudaFree(d_H_col);
+    //cudaFree(d_C);
     cudaFree(d_deltaW);
+    cudaFree(d_deltaW_trimmed);
     cudaFree(d_x);
     cudaFree(d_y);
     cudaEventDestroy(start);
@@ -226,4 +238,5 @@ int main(int argc, char** argv) {
     delete[] x;
 
     return 0;
+
 }
