@@ -1,12 +1,11 @@
 
-#include "load_ckpt.h"
 #include <cnpy.h>
+#include "load_ckpt.h"
 #include <vector>
 #include <cmath>
 #include <iostream>
 #include <string>
 #include <cstdlib>
-#include <cuda.h>
 
 // Utility: Get next power of 2
 int next_power_of_2(int n) {
@@ -36,42 +35,62 @@ void create_hadamard_matrix(int n, float** d_H) {
     cudaMemcpy(*d_H, H_host.data(), n * n * sizeof(float), cudaMemcpyHostToDevice);
 }
 
-// CUDA Matrix Multiplication Kernel with clock64 timing
-__global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K, unsigned long long* d_cycles) {
+// CUDA Matrix Multiplication Kernel
+/* __global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if (row < M && col < N) {
-        unsigned long long start = clock64();
-    
         float sum = 0.0f;
         for (int i = 0; i < K; ++i) {
             sum += A[row * K + i] * B[i * N + col];
         }
         C[row * N + col] = sum;
-    
-        unsigned long long end = clock64();
-    
-        // Only thread (0,0) of (0,0) block stores timing if it's a valid thread
-        if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-            d_cycles[0] = end - start;
-    }    
+    }
+} */
+
+// CUDA Matrix Multiplication Kernel with clock64 timing
+__global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K, unsigned long long* d_cycles) {
+    unsigned long long start = clock64();
+
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < M && col < N) {
+        float sum = 0.0f;
+        for (int i = 0; i < K; ++i) {
+            sum += A[row * K + i] * B[i * N + col];
+        }
+        C[row * N + col] = sum;
+    }
+
+    unsigned long long end = clock64();
+
+    if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
+        d_cycles[0] = end - start;
 }
 
 // Calculate deltaW = H * C * H^T
-void calculate_deltaW(float* d_H_row, float* d_C, float* d_H_col, int rows, int cols, float** d_deltaW) {
+void calculate_deltaW(float* d_H_row, float* d_C, float* d_H_col, int rows, int cols, float** d_deltaW, int threads_per_block) {
     float* d_temp;
     cudaMalloc(&d_temp, rows * cols * sizeof(float));
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 blocksPerGrid((cols + 15) / 16, (rows + 15) / 16);
+    //dim3 threadsPerBlock(16, 16);
+    //dim3 blocksPerGrid((cols + 15) / 16, (rows + 15) / 16);
 
-    matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_H_row, d_C, d_temp, rows, cols, rows, nullptr);
-    cudaDeviceSynchronize();
+    int tx = std::sqrt(threads_per_block);
+    int ty = threads_per_block / tx;
+    dim3 threadsPerBlockDim(tx, ty);
+    dim3 blocksPerGrid((cols + tx - 1) / tx, (rows + ty - 1) / ty);
+
+    //matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_H_row, d_C, d_temp, rows, cols, rows);
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_H_row, d_C, d_temp, rows, cols, rows);
+    //cudaDeviceSynchronize();
 
     cudaMalloc(d_deltaW, rows * cols * sizeof(float));
-    matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols, nullptr);
-    cudaDeviceSynchronize();
+    //matmul_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols);
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_temp, d_H_col, *d_deltaW, rows, cols, cols);
+    //cudaDeviceSynchronize();
 
     cudaFree(d_temp);
 }
@@ -84,10 +103,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // CUDA event setup
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
+    // Parse input
     int ct_mat_rows_input = std::atoi(argv[1]);
     int ct_mat_cols_input = std::atoi(argv[2]);
     int num_tokens = std::atoi(argv[3]);
@@ -99,6 +120,12 @@ int main(int argc, char** argv) {
     int ct_mat_rows = next_power_of_2(ct_mat_rows_input);
     int ct_mat_cols = next_power_of_2(ct_mat_cols_input);
 
+    // Allocate host memory
+    float* h_y = new float[num_tokens * ct_mat_cols];
+    float* h_D = new float[ct_mat_rows * ct_mat_cols];
+    float* h_dw = new float[ct_mat_rows * ct_mat_cols];
+
+    // Load coefficient and location data
     float* ct = nullptr;
     auto [ct_rows, ct_cols] = load_ckpt_float(ct_directory, ct);
 
@@ -108,6 +135,7 @@ int main(int argc, char** argv) {
     float* x = nullptr;
     auto [x_rows, x_cols] = load_ckpt_float(x_directory, x);
 
+    // Construct full dense matrix from sparse representation
     float* ct_mat = new float[ct_mat_rows * ct_mat_cols]();
     for (size_t i = 0; i < locs_cols; ++i) {
         int row = locs[i];
@@ -115,33 +143,65 @@ int main(int argc, char** argv) {
         ct_mat[row * ct_mat_cols + col] = ct[i];
     }
     std::cout << "\n C matrix loaded\n";
+   
 
+    // Allocate and copy C matrix to device
     float* d_C = nullptr;
     cudaMalloc(&d_C, ct_mat_rows * ct_mat_cols * sizeof(float));
     cudaMemcpy(d_C, ct_mat, ct_mat_rows * ct_mat_cols * sizeof(float), cudaMemcpyHostToDevice);
     std::cout << "\n C matrix copied into device\n";
 
+    // Create Hadamard matrices
     float* d_H_row = nullptr;
     float* d_H_col = nullptr;
     create_hadamard_matrix(ct_mat_rows, &d_H_row);
     create_hadamard_matrix(ct_mat_cols, &d_H_col);
     std::cout << "\n Hadamard matrix created\n";
 
+    // Copy input X to device
     float* d_x = nullptr;
     cudaMalloc(&d_x, x_rows * x_cols * sizeof(float));
     cudaMemcpy(d_x, x, x_rows * x_cols * sizeof(float), cudaMemcpyHostToDevice);
+    
     std::cout << "\n Input X copied into device\n";
-
+    // Allocate output Y on device
     float* d_y = nullptr;
     cudaMalloc(&d_y, x_rows * ct_mat_cols * sizeof(float));
 
+    // Start timing
     cudaEventRecord(start);
 
+    // deltaW = H × C × Hᵗ
     float* d_deltaW = nullptr;
-    calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW);
-    std::cout << "\n Delta W completed\n";
-    cudaDeviceSynchronize();
+    calculate_deltaW(d_H_row, d_C, d_H_col, ct_mat_rows, ct_mat_cols, &d_deltaW, threads_per_block);
+    std::cout << "\n Detla W completed\n";
+    //cudaDeviceSynchronize();
 
+     // Cleanup
+     cudaFree(d_H_row);
+     cudaFree(d_H_col);
+     cudaFree(d_C);
+
+    // Y = deltaW × X
+    //dim3 threadsPerBlockDim(16, 16);
+    //dim3 blocksPerGrid((ct_mat_cols + 15) / 16, (x_rows + 15) / 16);
+    //dim3 blocksPerGrid((ct_mat_cols + tx - 1) / tx, (x_rows + ty - 1) / ty);
+
+    float* d_deltaW_trimmed;
+    cudaMalloc(&d_deltaW_trimmed, ct_mat_rows * x_rows * sizeof(float));
+
+    // Use cudaMemcpy2D to copy selected portion row-wise
+    cudaMemcpy2D(
+        d_deltaW_trimmed,               // dst
+        x_rows * sizeof(float),         // dst pitch (row stride)
+        d_deltaW,                       // src
+        ct_mat_cols * sizeof(float),    // src pitch (full row stride)
+        x_rows * sizeof(float),         // width in bytes (columns to keep)
+        ct_mat_rows,                    // height (number of rows)
+        cudaMemcpyDeviceToDevice
+    );
+
+    // Calculate thread block and grid dimensions
     int tx = std::sqrt(threads_per_block);
     int ty = threads_per_block / tx;
     int grid_x = (x_cols + tx - 1) / tx;
@@ -152,19 +212,25 @@ int main(int argc, char** argv) {
     std::cout << "\n Launching matmul_kernel with: \n";
     std::cout << "\tThreads per block: (" << tx << ", " << ty << ")\n";
     std::cout << "\tBlocks per grid: (" << grid_x << ", " << grid_y << ")\n";
+    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(
+        d_deltaW_trimmed,
+        d_x,
+        d_y,
+        ct_mat_rows,
+        x_cols,
+        x_rows
+    );
 
-    unsigned long long* d_cycles;
-    cudaMalloc(&d_cycles, sizeof(unsigned long long));
 
-    matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_x, d_deltaW, d_y, x_rows, ct_mat_cols, x_cols, d_cycles);
-    cudaDeviceSynchronize();
+    // last parameter to matmul_kernel is truncated to x_cols truncate the ct_mat_cols to x_cols
+    //int x_cols_int = static_cast<int>(x_cols);
+    //int x_cols_compute = (ct_mat_rows > x_cols_int) ? x_cols_int : ct_mat_rows;
+    //matmul_kernel<<<blocksPerGrid, threadsPerBlockDim>>>(d_deltaW, d_x, d_y, x_rows, ct_mat_cols, x_cols_compute); 
 
-    unsigned long long h_cycles = 0;
-    cudaMemcpy(&h_cycles, d_cycles, sizeof(unsigned long long), cudaMemcpyDeviceToHost);
-    std::cout << "GPU clock cycles used by matmul_kernel: " << h_cycles << "\n";
+    std::cout << "\n Y computation completed\n";
+    //cudaDeviceSynchronize();
 
-    cudaFree(d_cycles);
-
+    // End timing
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float milliseconds = 0.0f;
@@ -173,19 +239,25 @@ int main(int argc, char** argv) {
     std::cout << "\n All computations done on CUDA!\n";
     std::cout << "CUDA Execution Time: " << milliseconds << " ms\n";
 
-    cudaFree(d_H_row);
-    cudaFree(d_H_col);
-    cudaFree(d_C);
+    // Cleanup
+    //cudaFree(d_H_row);
+    //cudaFree(d_H_col);
+    //cudaFree(d_C);
     cudaFree(d_deltaW);
+    cudaFree(d_deltaW_trimmed);
     cudaFree(d_x);
     cudaFree(d_y);
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 
+    delete[] h_y;
+    delete[] h_D;
+    delete[] h_dw;
     delete[] ct_mat;
     delete[] ct;
     delete[] locs;
     delete[] x;
 
     return 0;
+
 }
