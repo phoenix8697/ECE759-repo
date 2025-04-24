@@ -1,8 +1,8 @@
 #! /usr/bin/env zsh
 #SBATCH --partition=instruction
 #SBATCH --job-name=hadamard_cuda
-#SBATCH --output="hadamard_%j.out"
-#SBATCH --error="hadamard_%j.err"
+#SBATCH --output="2_hadamard-gemma-2-2b-value.out"
+#SBATCH --error="2_hadamard-gemma-2-2b-value.err"
 #SBATCH --gres=gpu:1
 #SBATCH --time=0-00:30:00
 #SBATCH --mem=32GB
