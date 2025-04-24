@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
     // CUDA events for deltaW
     cudaEvent_t start, mid, stop;
     cudaEventCreate(&start);
-    cudaEventCreate(&mid);
+    //cudaEventCreate(&mid);
     cudaEventCreate(&stop);
 
     // deltaW = H * C * H^T
@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
     cudaEventRecord(start);
     matmul_kernel_1d<<<num_blocks_temp, threads_per_block>>>(
         d_H_row, d_C, d_temp, ct_mat_rows, ct_mat_cols, ct_mat_rows);
-    cudaEventRecord(mid);
+    //cudaEventRecord(mid);
 
     int total_threads_final = ct_mat_rows * ct_mat_cols;
     int num_blocks_final = (total_threads_final + threads_per_block - 1) / threads_per_block;
@@ -140,9 +140,10 @@ int main(int argc, char** argv) {
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
-    float time_HC = 0.0f, time_HCHT = 0.0f;
-    cudaEventElapsedTime(&time_HC, start, mid);
-    cudaEventElapsedTime(&time_HCHT, mid, stop);
+    float time_HC = 0.0f;
+    // time_HCHT = 0.0f;
+    cudaEventElapsedTime(&time_HC, start, stop);
+    //cudaEventElapsedTime(&time_HCHT, mid, stop);
 
     //std::cout << "\n✅ Delta W computed using Hadamard matrices\n";
     //std::cout << "⏱ H * C kernel time: " << time_HC << " ms\n";
@@ -175,7 +176,8 @@ int main(int argc, char** argv) {
     //std::cout << "⏱ Y = deltaW * X kernel time: " << time_Y << " ms\n";
     std::cout << "Model:" << ct_directory << "\n";
     std::cout << "Input:" << x_directory << "\n";
-    std::cout << "Number of Threads per block:" << threads_per_block << "      Total Time:" << time_Y + time_HC + time_HCHT << " ms\n";
+    std::cout << "Number of Threads per block:" << threads_per_block <<"\n";
+    std::cout << "Total Time:" << time_Y + time_HC << " ms\n";
 
     // Cleanup
     cudaFree(d_H_row);
