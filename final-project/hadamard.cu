@@ -89,23 +89,23 @@ int main(int argc, char** argv) {
         int col = locs[locs_cols + i];
         ct_mat[row * ct_mat_cols + col] = ct[i];
     }
-    std::cout << "\n C matrix loaded\n";
+    //std::cout << "\n C matrix loaded\n";
 
     float* d_C = nullptr;
     cudaMalloc(&d_C, ct_mat_rows * ct_mat_cols * sizeof(float));
     cudaMemcpy(d_C, ct_mat, ct_mat_rows * ct_mat_cols * sizeof(float), cudaMemcpyHostToDevice);
-    std::cout << "\n C matrix copied into device\n";
+    //std::cout << "\n C matrix copied into device\n";
 
     float* d_H_row = nullptr;
     float* d_H_col = nullptr;
     create_hadamard_matrix(ct_mat_rows, &d_H_row);
     create_hadamard_matrix(ct_mat_cols, &d_H_col);
-    std::cout << "\n Hadamard matrix created\n";
+    //std::cout << "\n Hadamard matrix created\n";
 
     float* d_x = nullptr;
     cudaMalloc(&d_x, x_rows * x_cols * sizeof(float));
     cudaMemcpy(d_x, x, x_rows * x_cols * sizeof(float), cudaMemcpyHostToDevice);
-    std::cout << "\n Input X copied into device\n";
+    //std::cout << "\n Input X copied into device\n";
 
     float* d_y = nullptr;
     cudaMalloc(&d_y, x_rows * ct_mat_cols * sizeof(float));
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
     //std::cout << "⏱ Y = deltaW * X kernel time: " << time_Y << " ms\n";
     std::cout << "Model:" << ct_directory << "\n";
     std::cout << "Input:" << x_directory << "\n";
-    std::cout << "Number of Threads per block:" << threads_per_block << "Total Time:" << time_Y + time_HC + time_HCHT << " ms\n";
+    std::cout << "Number of Threads per block:" << threads_per_block << "      Total Time:" << time_Y + time_HC + time_HCHT << " ms\n";
 
     // Cleanup
     cudaFree(d_H_row);
