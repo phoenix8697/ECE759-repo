@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
     cudaFree(d_x);
     cudaFree(d_y);
     cudaEventDestroy(start);
-    cudaEventDestroy(mid);
+    //cudaEventDestroy(mid);
     cudaEventDestroy(stop);
     cudaEventDestroy(final_start);
     cudaEventDestroy(final_stop);
