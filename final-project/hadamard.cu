@@ -38,23 +38,24 @@ void create_hadamard_matrix(int n, float** d_H) {
 
 // CUDA Matrix Multiplication Kernel with clock64 timing
 __global__ void matmul_kernel(const float* A, const float* B, float* C, int M, int N, int K, unsigned long long* d_cycles) {
-    unsigned long long start = clock64();
-
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     if (row < M && col < N) {
+        unsigned long long start = clock64();
+    
         float sum = 0.0f;
         for (int i = 0; i < K; ++i) {
             sum += A[row * K + i] * B[i * N + col];
         }
         C[row * N + col] = sum;
-    }
-
-    unsigned long long end = clock64();
-
-    if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-        d_cycles[0] = end - start;
+    
+        unsigned long long end = clock64();
+    
+        // Only thread (0,0) of (0,0) block stores timing if it's a valid thread
+        if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
+            d_cycles[0] = end - start;
+    }    
 }
 
 // Calculate deltaW = H * C * H^T
